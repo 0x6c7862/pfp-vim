@@ -148,21 +148,6 @@ def move_to(line, column):
 
 # ---------------------------------------
 
-PFP_CONFIG = {}
-def pfp_init(prompt_for_path=False):
-	global PFP_CONFIG
-
-	config_file = os.path.expanduser(os.path.join("~", ".pfp"))
-
-	if not os.path.exists(config_file) or prompt_for_path:
-		path = _input("Where are your templates at? (a path)")
-		PFP_CONFIG.setdefault("template_dirs", []).append(path)
-		with open(config_file, "w") as f:
-			f.write(json.dumps(PFP_CONFIG))
-	else:
-		with open(config_file, "r") as f:
-			PFP_CONFIG = json.loads(f.read())
-
 def pfp_cursor_moved():
 	pass
 	
@@ -172,28 +157,6 @@ def noCaseCmp(x,y):
 	elif x.lower() < y.lower():
 		return -1
 	return 0
-
-def pfp_choose_template():
-	pfp_init()
-
-	print("Choose the template to parse with (*.bt):")
-	template_dirs = PFP_CONFIG.setdefault("template_dirs", []) + [os.getcwd()]
-
-	templates = []
-	for template_dir in template_dirs:
-		templates += glob.glob(os.path.join(os.path.expanduser(template_dir), "*.bt"))
-		
-	templates.sort(cmp=noCaseCmp)
-	
-	for idx,template in enumerate(templates):
-		print("[{:2d}] {}".format(idx, template))
-	
-	template_idx = int(_input("template #"))
-	if template_idx < 0 or template_idx > len(templates):
-		err("Invalid template idx, try again some other time")
-		return None
-	
-	return templates[template_idx]
 
 def pfp_format_hex_line(data):
 	# e.g "00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff"
@@ -255,71 +218,6 @@ def pfp_hex_dump_file(filename):
 				break
 
 	buff_puts("\n".join(hex_lines))
-
-def pfp_parse(): 
-	vim.command("silent! set noeol")
-	vim.command("silent! set binary")
-	curr_file = vim.current.buffer.name
-	if curr_file.startswith("__PFP_HEX__"):
-		curr_file = vim.eval("b:pfp_orig_file")
-
-	vim.command("tabnew")
-	vim.command("setlocal nolist")
-	vim.command("setlocal nospell")
-	vim.command("setlocal nonumber")
-	vim.command("setlocal noswapfile")
-	vim.command("setlocal nobuflisted")
-	vim.command("setlocal bufhidden=hide")
-	vim.command("setlocal buftype=nofile")
-	vim.command("let b:pfp_orig_file = '" + curr_file + "'")
-	vim.command("set filetype=pfp_hex")
-	vim.command("set syntax=pfp_hex")
-
-	count = 0
-	count_str = ""
-	while True:
-		try:
-			name = "__PFP_HEX__\\ " + curr_file.replace(" ", "\\ ") + count_str
-			vim.command("file " + name)
-			break
-		except:
-			count += 1
-			count_str = "\\ " + str(count)
-
-	curr_winnr = vim.current.window.number
-	if not os.path.exists(curr_file):
-		err("could not locate file {}".format(curr_file))
-		return
-	
-	template_path = pfp_choose_template()
-	if template_path is None:
-		return
-	if not os.path.exists(template_path):
-		err("could not locate template {}".format(template_path))
-		return
-	
-	pfp_hex_dump_file(curr_file)
-
-	dom = pfp.parse(data_file=curr_file, template_file=template_path, int3=False)
-
-	total_width = 0
-	for window in vim.windows:
-		total_width += window.width
-	
-	create_scratch(
-		dom._pfp__show(include_offset=True),
-		width = int(total_width/2), # yes, explicitly make it an int b/c of python3
-		fit_to_contents = False,
-		scratch_name = name.replace("__PFP_HEX__", "__PFP__DOM__")
-	)
-
-	vim.command("set syntax=pfp_dom")
-	vim.command("set cursorline")
-	vim.command("let b:winnr = {}".format(curr_winnr))
-	# go to the top
-	vim.command("normal! gg")
-	vim.command("set filetype=pfp_dom")
-	vim.command("set syntax=pfp_dom")
 
 def pfp_getline(line=None):
 	this_buffer = vim.current.buffer.number
@@ -458,6 +356,78 @@ endfunction
 
 call DefinePfp()
 
+function! PfpParse(template_path)
+python <<_EOF_
+import vim
+
+template_path = vim.eval("a:template_path")
+
+vim.command("silent! set noeol")
+vim.command("silent! set binary")
+curr_file = vim.current.buffer.name
+if curr_file.startswith("__PFP_HEX__"):
+	curr_file = vim.eval("b:pfp_orig_file")
+
+vim.command("tabnew")
+vim.command("setlocal nolist")
+vim.command("setlocal nospell")
+vim.command("setlocal nonumber")
+vim.command("setlocal noswapfile")
+vim.command("setlocal nobuflisted")
+vim.command("setlocal bufhidden=hide")
+vim.command("setlocal buftype=nofile")
+vim.command("let b:pfp_orig_file = '" + curr_file + "'")
+vim.command("set filetype=pfp_hex")
+vim.command("set syntax=pfp_hex")
+
+count = 0
+count_str = ""
+while True:
+	try:
+		name = "__PFP_HEX__\\ " + curr_file.replace(" ", "\\ ") + count_str
+		vim.command("file " + name)
+		break
+	except:
+		count += 1
+		count_str = "\\ " + str(count)
+
+curr_winnr = vim.current.window.number
+if not os.path.exists(curr_file):
+	err("could not locate file {}".format(curr_file))
+	#return
+
+if template_path is None:
+	#return
+	pass
+if not os.path.exists(template_path):
+	err("could not locate template {}".format(template_path))
+	#return
+
+pfp_hex_dump_file(curr_file)
+
+dom = pfp.parse(data_file=curr_file, template_file=template_path, int3=False)
+
+total_width = 0
+for window in vim.windows:
+	total_width += window.width
+
+create_scratch(
+	dom._pfp__show(include_offset=True),
+	width = int(total_width/2), # yes, explicitly make it an int b/c of python3
+	fit_to_contents = False,
+	scratch_name = name.replace("__PFP_HEX__", "__PFP__DOM__")
+)
+
+vim.command("set syntax=pfp_dom")
+vim.command("set cursorline")
+vim.command("let b:winnr = {}".format(curr_winnr))
+# go to the top
+vim.command("normal! gg")
+vim.command("set filetype=pfp_dom")
+vim.command("set syntax=pfp_dom")
+_EOF_
+endfunction
+
 function! PfpHandleCursorMoved()
 	if &ft ==# 'pfp_dom'
 		if b:pfp_dom_last_line != line('.')
@@ -483,8 +453,5 @@ highlight pfp_hex_selection ctermfg=red ctermbg=black
 " -------------------
 " -------------------
 
-" load/init ~/.pfp
-command! -nargs=0 PfpInit py pfp_init(True)
-
 " parse the current file
-command! -nargs=0 PfpParse py pfp_parse()
+command! -nargs=1 PfpParse call PfpParse(<f-args>)
